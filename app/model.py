@@ -1,5 +1,10 @@
 import re
+from pathlib import Path
+import joblib
 
+TRAINED_MODEL_PATH = Path(__file__).resolve().parent / "trained_model.joblib"
+
+_trained_artifact = None
 
 STOPWORDS = {
     "with", "without", "w", "wo", "cntrst", "contrast", "con",
@@ -98,3 +103,31 @@ def predict_one(current_desc: str, prior_desc: str) -> bool:
         return True
 
     return False
+
+def get_trained_artifact():
+    global _trained_artifact
+
+    if _trained_artifact is None and TRAINED_MODEL_PATH.exists():
+        _trained_artifact = joblib.load(TRAINED_MODEL_PATH)
+
+    return _trained_artifact
+
+
+def predict_one_ml(current_desc: str, prior_desc: str) -> bool:
+    artifact = get_trained_artifact()
+
+    heuristic_pred = predict_one(current_desc, prior_desc)
+
+    if artifact is None:
+        return heuristic_pred
+
+    text = f"CURRENT: {current_desc} PRIOR: {prior_desc}"
+    prob = artifact["model"].predict_proba([text])[0, 1]
+
+    if prob >= 0.90:
+        return True
+
+    if prob <= 0.05:
+        return False
+
+    return heuristic_pred

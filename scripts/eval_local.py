@@ -5,7 +5,7 @@ import sys
 # allow importing from app/
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from app.model import predict_one
+from app.model import predict_one_ml
 
 
 def main():
@@ -29,7 +29,7 @@ def main():
         for prior in case["prior_studies"]:
             key = (case["case_id"], prior["study_id"])
 
-            pred = predict_one(current_desc, prior["study_description"])
+            pred = predict_one_ml(current_desc, prior["study_description"])
             gold = truth[key]
 
             if pred == gold:
