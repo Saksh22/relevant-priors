@@ -46,6 +46,44 @@ BODY_GROUPS = [
     {"breast", "mammo", "mammogram"},
 ]
 
+BREAST_TERMS = {
+    "mam",
+    "mammo",
+    "mammography",
+    "mammogram",
+    "breast",
+    "tomo",
+}
+
+BREAST_ULTRASOUND_TERMS = {
+    "us breast",
+    "ultrasound breast",
+    "breast ultrasound",
+}
+
+BREAST_MRI_TERMS = {
+    "mri breast",
+    "mr breast",
+}
+
+CARDIAC_TERMS = {
+    "myo",
+    "myocardial",
+    "coronary",
+    "cardiac",
+    "calcium",
+    "calc",
+    "cta coronary",
+    "ct coronary",
+}
+
+PET_CT_TERMS = {
+    "pet ct",
+    "pet/ct",
+    "skullthigh",
+    "skull thigh",
+    "f18",
+}
 
 def normalize(text: str) -> list[str]:
     text = text or ""
@@ -114,6 +152,10 @@ def get_trained_artifact():
 
 
 def predict_one_ml(current_desc: str, prior_desc: str) -> bool:
+    override = targeted_override(current_desc, prior_desc)
+    if override is not None:
+        return override
+
     artifact = get_trained_artifact()
 
     heuristic_pred = predict_one(current_desc, prior_desc)
@@ -131,3 +173,59 @@ def predict_one_ml(current_desc: str, prior_desc: str) -> bool:
         return False
 
     return heuristic_pred
+
+def contains_any(desc: str, terms: set[str]) -> bool:
+    normalized = " ".join(normalize(desc))
+    return any(term in normalized for term in terms)
+
+def is_breast_related(desc: str) -> bool:
+    return (
+        contains_any(desc, BREAST_TERMS)
+        or contains_any(desc, BREAST_ULTRASOUND_TERMS)
+        or contains_any(desc, BREAST_MRI_TERMS)
+    )
+
+
+def is_cardiac_related(desc: str) -> bool:
+    return contains_any(desc, CARDIAC_TERMS)
+
+
+def is_petct_related(desc: str) -> bool:
+    return contains_any(desc, PET_CT_TERMS)
+
+
+def targeted_override(current_desc: str, prior_desc: str) -> bool | None:
+    """
+    Return:
+      True  -> force relevant
+      False -> force irrelevant
+      None  -> no override
+    """
+
+    # Breast priors are often relevant across mammo / US breast / MRI breast.
+    if is_breast_related(current_desc) and is_breast_related(prior_desc):
+        return True
+
+    # Myocardial perfusion and coronary CT/calcium scoring are related priors.
+    if is_cardiac_related(current_desc) and is_cardiac_related(prior_desc):
+        return True
+
+    # PET/CT is often relevant to CT chest/abdomen/pelvis oncology-style follow-up.
+    if is_petct_related(current_desc) or is_petct_related(prior_desc):
+        current_terms = body_terms(current_desc)
+        prior_terms = body_terms(prior_desc)
+
+        body_overlap = {
+            "chest",
+            "lung",
+            "thorax",
+            "abdomen",
+            "abdominal",
+            "pelvis",
+            "pelvic",
+        }
+
+        if current_terms & body_overlap or prior_terms & body_overlap:
+            return True
+
+    return None
