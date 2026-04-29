@@ -1,7 +1,7 @@
 import logging
 from fastapi import FastAPI
 from app.schemas import RequestPayload, ResponsePayload, Prediction
-from app.model import predict_one
+from app.model import predict_batch_v2
 
 logging.basicConfig(level=logging.INFO)
 
@@ -15,7 +15,10 @@ def health():
 
 @app.post("/predict", response_model=ResponsePayload)
 def predict(payload: RequestPayload):
-    predictions = []
+    predictions = [
+    Prediction(**p)
+    for p in predict_batch_v2(payload.cases)
+]
 
     total_priors = sum(len(c.prior_studies) for c in payload.cases)
 
@@ -25,20 +28,5 @@ def predict(payload: RequestPayload):
         len(payload.cases),
         total_priors,
     )
-
-    for case in payload.cases:
-        current_desc = case.current_study.study_description
-
-        for prior in case.prior_studies:
-            predictions.append(
-                Prediction(
-                    case_id=case.case_id,
-                    study_id=prior.study_id,
-                    predicted_is_relevant=predict_one(
-                        current_desc,
-                        prior.study_description,
-                    ),
-                )
-            )
-
+    
     return ResponsePayload(predictions=predictions)

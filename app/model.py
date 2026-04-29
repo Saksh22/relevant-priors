@@ -1,6 +1,11 @@
 import re
 from pathlib import Path
 import joblib
+from app.features import make_structured_features
+
+MODEL_V2_PATH = Path(__file__).resolve().parent / "model_v2.joblib"
+
+_model_v2_artifact = None
 
 TRAINED_MODEL_PATH = Path(__file__).resolve().parent / "trained_model.joblib"
 
@@ -151,29 +156,6 @@ def get_trained_artifact():
     return _trained_artifact
 
 
-def predict_one_ml(current_desc: str, prior_desc: str) -> bool:
-    override = targeted_override(current_desc, prior_desc)
-    if override is not None:
-        return override
-
-    artifact = get_trained_artifact()
-
-    heuristic_pred = predict_one(current_desc, prior_desc)
-
-    if artifact is None:
-        return heuristic_pred
-
-    text = f"CURRENT: {current_desc} PRIOR: {prior_desc}"
-    prob = artifact["model"].predict_proba([text])[0, 1]
-
-    if prob >= 0.90:
-        return True
-
-    if prob <= 0.05:
-        return False
-
-    return heuristic_pred
-
 def contains_any(desc: str, terms: set[str]) -> bool:
     normalized = " ".join(normalize(desc))
     return any(term in normalized for term in terms)
@@ -229,3 +211,76 @@ def targeted_override(current_desc: str, prior_desc: str) -> bool | None:
             return True
 
     return None
+
+def get_model_v2_artifact():
+    global _model_v2_artifact
+
+    if _model_v2_artifact is None and MODEL_V2_PATH.exists():
+        _model_v2_artifact = joblib.load(MODEL_V2_PATH)
+
+    return _model_v2_artifact
+
+
+def predict_batch_v2(cases) -> list[dict]:
+    artifact = get_model_v2_artifact()
+
+    rows = []
+    prediction_refs = []
+
+    for case in cases:
+        for prior in case.prior_studies:
+            rows.append(
+                make_structured_features(
+                    case.current_study.study_description,
+                    prior.study_description,
+                    case.current_study.study_date,
+                    prior.study_date,
+                )
+            )
+
+            prediction_refs.append(
+                {
+                    "case_id": case.case_id,
+                    "study_id": prior.study_id,
+                }
+            )
+
+    if not rows:
+        return []
+
+    if artifact is None:
+        results = []
+
+        for case in cases:
+            for prior in case.prior_studies:
+                results.append(
+                    {
+                        "case_id": case.case_id,
+                        "study_id": prior.study_id,
+                        "predicted_is_relevant": predict_one_ml(
+                            case.current_study.study_description,
+                            prior.study_description,
+                        ),
+                    }
+                )
+
+        return results
+
+    import pandas as pd
+
+    X = pd.DataFrame(rows)
+    probs = artifact["model"].predict_proba(X)[:, 1]
+    threshold = artifact["threshold"]
+
+    predictions = []
+
+    for ref, prob in zip(prediction_refs, probs):
+        predictions.append(
+            {
+                "case_id": ref["case_id"],
+                "study_id": ref["study_id"],
+                "predicted_is_relevant": bool(prob >= threshold),
+            }
+        )
+
+    return predictions
